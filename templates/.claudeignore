@@ -1,0 +1,39 @@
+# Build artifacts
+bin/
+dist/
+vendor/
+
+# Go cache
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Dependencies
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+.docker/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Generated
+*.pb.go
+*_mock.go
+mock_*.go
