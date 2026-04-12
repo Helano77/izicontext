@@ -1,0 +1,1223 @@
+#!/bin/bash
+set -e
+
+VERSION="0.1.0"
+REPO="YOUR_ORG/izicontext"
+BRANCH="main"
+BASE_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+# ── Colors ────────────────────────────────────────────────────────────────────
+
+if [[ -t 1 ]]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[0;33m'
+  BLUE='\033[0;34m'
+  PURPLE='\033[0;35m'
+  CYAN='\033[0;36m'
+  GRAY='\033[0;90m'
+  BOLD='\033[1m'
+  DIM='\033[2m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' BLUE='' PURPLE='' CYAN='' GRAY='' BOLD='' DIM='' NC=''
+fi
+
+print_green()  { printf "${GREEN}%s${NC}\n" "$1"; }
+print_red()    { printf "${RED}%s${NC}\n" "$1"; }
+print_yellow() { printf "${YELLOW}%s${NC}\n" "$1"; }
+print_blue()   { printf "${BLUE}%s${NC}\n" "$1"; }
+print_gray()   { printf "${GRAY}%s${NC}\n" "$1"; }
+print_cyan()   { printf "${CYAN}%s${NC}\n" "$1"; }
+# ── Icons ─────────────────────────────────────────────────────────────────────
+
+ICON_SUCCESS="✓"
+ICON_ERROR="✗"
+ICON_WARNING="⚠"
+ICON_ARROW="➤"
+ICON_INFO="ℹ"
+ICON_SECTION="◆"
+ICON_DOWNLOAD="↓"
+ICON_SKIP="○"
+ICON_UPDATE="↻"
+ICON_CHECK="◎"
+ICON_ADMIN="⚙"
+ICON_NAV="↳"
+ICON_ADD="+"
+ICON_MODIFY="~"
+ICON_UNCHANGED="="
+ICON_MANAGED="•"
+# ── UI Utilities ──────────────────────────────────────────────────────────────
+
+get_term_width() {
+  local width
+  width=$(tput cols 2>/dev/null || echo "")
+  if [ -z "$width" ] || [ "$width" -lt 40 ] 2>/dev/null; then
+    width=80
+  fi
+  echo "$width"
+}
+
+print_block_header() {
+  local title="$1"
+  local width
+  width=$(get_term_width)
+  local title_len=${#title}
+  local pad=$((width - title_len - 6))
+  [ "$pad" -lt 4 ] && pad=4
+  local line=""
+  local i
+  for ((i = 0; i < pad; i++)); do
+    line="${line}─"
+  done
+  printf "\n  ${BOLD}── %s ${NC}${GRAY}%s${NC}\n" "$title" "$line"
+}
+
+print_block_footer() {
+  local width
+  width=$(get_term_width)
+  local pad=$((width - 4))
+  [ "$pad" -lt 10 ] && pad=10
+  local line=""
+  local i
+  for ((i = 0; i < pad; i++)); do
+    line="${line}─"
+  done
+  printf "  ${GRAY}%s${NC}\n" "$line"
+}
+
+print_aligned() {
+  local label="$1"
+  local value="$2"
+  local indent="${3:-4}"
+  local pad_fmt="%-${indent}s"
+  printf "  ${pad_fmt}${GRAY}%s${NC}\n" "$label" "$value"
+}
+# ── Spinner ───────────────────────────────────────────────────────────────────
+
+SPINNER_PID=""
+start_spinner() {
+  local msg="$1"
+  local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  local i=0
+  while true; do
+    printf "\r  ${BLUE}${frames[$i]}${NC} ${msg}"
+    i=$(( (i + 1) % 10 ))
+    sleep 0.1
+  done &
+  SPINNER_PID=$!
+}
+
+stop_spinner() {
+  local msg="$1"
+  if [ -n "$SPINNER_PID" ]; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+  fi
+  printf "\r\033[K"
+  if [ -n "$msg" ]; then
+    echo "$msg"
+  fi
+}
+# ── Utilities ─────────────────────────────────────────────────────────────────
+
+slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+prompt() {
+  local message="$1"
+  local default="$2"
+  local result
+  if [ -n "$default" ]; then
+    printf "%s [%s]: " "$message" "$default" >&2
+    read -r result
+    echo "${result:-$default}"
+  else
+    printf "%s: " "$message" >&2
+    read -r result
+    echo "$result"
+  fi
+}
+
+confirm() {
+  local message="$1"
+  local answer
+  printf "%s [y/N]: " "$message"
+  read -r answer
+  [[ "$answer" =~ ^[Yy] ]]
+}
+
+confirm_yes() {
+  local message="$1"
+  local answer
+  printf "%s [Y/n]: " "$message"
+  read -r answer
+  [[ ! "$answer" =~ ^[Nn] ]]
+}
+
+download() {
+  local url="$1"
+  local target="$2"
+  if command -v curl &> /dev/null; then
+    curl -fsSL "$url" -o "$target"
+  elif command -v wget &> /dev/null; then
+    wget -q "$url" -O "$target"
+  else
+    print_red "Error: curl or wget required"
+    exit 1
+  fi
+}
+
+# Declarative cleanup: remove files in a managed directory not in the expected list.
+# Usage: cleanup_managed_dir <dir> <expected_file1> [expected_file2] ...
+cleanup_managed_dir() {
+  local dir="$1"; shift
+  local expected=("$@")
+
+  [ -d "$dir" ] || return 0
+  [ ${#expected[@]} -eq 0 ] && return 0
+
+  for file in "$dir"/*; do
+    [ -L "$file" ] && continue
+    [ -f "$file" ] || continue
+    local name=$(basename "$file")
+    local keep=false
+    for expected_name in "${expected[@]}"; do
+      if [ "$name" = "$expected_name" ]; then
+        keep=true
+        break
+      fi
+    done
+    if [ "$keep" = false ]; then
+      rm -f "$file"
+    fi
+  done
+}
+# ── Hook Setup ────────────────────────────────────────────────────────────────
+
+setup_notifications() {
+  local scripts_dir=".claude/scripts"
+  local settings_file=".claude/settings.json"
+
+  mkdir -p "$scripts_dir"
+
+  download "${BASE_URL}/scripts/notify.sh" "$scripts_dir/notify.sh"
+  chmod +x "$scripts_dir/notify.sh"
+  download "${BASE_URL}/scripts/tool-failure-guard.sh" "$scripts_dir/tool-failure-guard.sh"
+  chmod +x "$scripts_dir/tool-failure-guard.sh"
+
+  if [ -f "$HOME/.claude/settings.json" ] && grep -q "notify.sh" "$HOME/.claude/settings.json" 2>/dev/null; then
+    print_yellow "Global notification hooks detected in ~/.claude/settings.json"
+    print_yellow "izicontext configures hooks per-project. You can remove the global hooks manually."
+  fi
+
+  local notification_hook='{
+    "matcher": "",
+    "hooks": [{"type": "command", "command": ".claude/scripts/notify.sh '\''izicontext'\'' '\''Needs your attention'\'' question"}]
+  }'
+  local stop_hook='{
+    "matcher": "",
+    "hooks": [{"type": "command", "command": ".claude/scripts/notify.sh '\''izicontext'\'' '\''Task completed'\'' success"}]
+  }'
+  local failure_guard_hook='{
+    "matcher": "",
+    "hooks": [{"type": "command", "command": ".claude/scripts/tool-failure-guard.sh"}]
+  }'
+
+  if [ ! -f "$settings_file" ]; then
+    cat > "$settings_file" << 'SETTINGS_EOF'
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": ".claude/scripts/notify.sh 'izicontext' 'Needs your attention' question"}]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": ".claude/scripts/notify.sh 'izicontext' 'Task completed' success"}]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "",
+        "hooks": [{"type": "command", "command": ".claude/scripts/tool-failure-guard.sh"}]
+      }
+    ]
+  }
+}
+SETTINGS_EOF
+    print_gray "Hooks configured in .claude/settings.json"
+  else
+    if ! grep -q "notify.sh" "$settings_file" 2>/dev/null; then
+      if command -v jq &>/dev/null; then
+        local temp_file=$(mktemp)
+        jq --argjson notif "$notification_hook" --argjson stop "$stop_hook" '
+          .hooks.Notification = ((.hooks.Notification // []) + [$notif]) |
+          .hooks.Stop = ((.hooks.Stop // []) + [$stop])
+        ' "$settings_file" > "$temp_file" 2>/dev/null
+        if [ $? -eq 0 ] && [ -s "$temp_file" ]; then
+          mv "$temp_file" "$settings_file"
+          print_gray "Notification hooks added to .claude/settings.json"
+        else
+          rm -f "$temp_file"
+        fi
+      else
+        print_yellow "Install jq to auto-configure hooks, or add manually"
+      fi
+    fi
+
+    if ! grep -q "tool-failure-guard" "$settings_file" 2>/dev/null; then
+      if command -v jq &>/dev/null; then
+        local temp_file=$(mktemp)
+        jq --argjson guard "$failure_guard_hook" '
+          .hooks.PostToolUseFailure = ((.hooks.PostToolUseFailure // []) + [$guard])
+        ' "$settings_file" > "$temp_file" 2>/dev/null
+        if [ $? -eq 0 ] && [ -s "$temp_file" ]; then
+          mv "$temp_file" "$settings_file"
+          print_gray "Tool failure guard hook added to .claude/settings.json"
+        else
+          rm -f "$temp_file"
+        fi
+      fi
+    fi
+  fi
+}
+# ── MCP Server Setup ──────────────────────────────────────────────────────────
+
+# Setup MCP servers in .mcp.json
+# izicontext uses Context7 (library docs) and Notion (tasks + docs)
+setup_mcp() {
+  local add_context7="$1"
+  local add_notion="$2"
+  local mcp_file=".mcp.json"
+
+  if [ -f "$mcp_file" ]; then
+    return 0
+  fi
+
+  local servers=""
+  local comma=""
+
+  if [ "$add_context7" = true ]; then
+    servers="${servers}${comma}
+    \"context7\": {
+      \"command\": \"npx\",
+      \"args\": [\"-y\", \"@upstash/context7-mcp\"]
+    }"
+    comma=","
+  fi
+
+  if [ "$add_notion" = true ]; then
+    servers="${servers}${comma}
+    \"notion\": {
+      \"command\": \"npx\",
+      \"args\": [\"-y\", \"@notionhq/notion-mcp-server\"],
+      \"env\": {
+        \"OPENAPI_MCP_HEADERS\": \"{\\\"Authorization\\\": \\\"Bearer \${NOTION_API_KEY}\\\", \\\"Notion-Version\\\": \\\"2022-06-28\\\"}\"
+      }
+    }"
+  fi
+
+  if [ -n "$servers" ]; then
+    cat > "$mcp_file" << EOF
+{
+  "mcpServers": {${servers}
+  }
+}
+EOF
+    print_gray "MCP servers configured in .mcp.json"
+    if [ "$add_notion" = true ]; then
+      print_yellow "Notion MCP: set NOTION_API_KEY in your environment"
+      print_yellow "Get your key at: https://www.notion.so/profile/integrations"
+    fi
+  fi
+}
+# ── Command: init ─────────────────────────────────────────────────────────────
+
+cmd_init() {
+  local project_name=""
+  local skip_prompts=false
+  local skip_setup=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--name) project_name="$2"; shift 2 ;;
+      -y|--yes) skip_prompts=true; shift ;;
+      --no-setup) skip_setup=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  print_blue ""
+  printf "${BLUE}📁 izicontext - AI Context Toolkit for Microservices${NC}\n\n"
+
+  local cwd="$(pwd)"
+
+  local is_reinit=false
+  if [ -d ".context" ]; then
+    is_reinit=true
+    print_yellow "Existing .context/ detected — will add missing files without overwriting your content."
+  fi
+
+  if [ -z "$project_name" ]; then
+    if [ "$skip_prompts" = false ]; then
+      project_name=$(prompt "Service name" "$(basename "$cwd")")
+    else
+      project_name="$(basename "$cwd")"
+    fi
+  fi
+
+  print_gray "Creating structure..."
+
+  # Create directories
+  mkdir -p ".context/decisions"
+  mkdir -p ".context/services"
+  mkdir -p ".context/prds/templates"
+  mkdir -p ".context/prds/generated"
+  mkdir -p ".context/discoveries"
+  mkdir -p ".context/bugs"
+  mkdir -p ".claude/commands"
+  mkdir -p ".claude/scripts"
+  mkdir -p ".claude/skills/bug-reproduction"
+  mkdir -p ".claude/skills/go-patterns"
+  mkdir -p ".claude/skills/service-communication"
+  mkdir -p ".claude/skills/batch-operations"
+  mkdir -p ".claude/skills/git-platform"
+  mkdir -p ".claude/agents/code-review"
+  mkdir -p ".claude/agents/deep-context"
+  mkdir -p ".claude/agents/fix-bug"
+
+  # Download templates
+  start_spinner "Downloading templates..."
+
+  local skipped_files=""
+  download_if_missing() {
+    local url="$1"
+    local target="$2"
+    if [ -f "$target" ]; then
+      if [ "$is_reinit" = true ]; then
+        skipped_files="${skipped_files}${target}\n"
+      fi
+      return 0
+    fi
+    download "$url" "$target"
+  }
+
+  # Seed files: user-customizable — only created if missing
+  download_if_missing "${BASE_URL}/templates/.claudeignore" ".claudeignore"
+  download_if_missing "${BASE_URL}/templates/CLAUDE.md" "CLAUDE.md"
+  download_if_missing "${BASE_URL}/templates/.context/CONTEXT.md" ".context/CONTEXT.md"
+  download_if_missing "${BASE_URL}/templates/.context/decisions/README.md" ".context/decisions/README.md"
+  download_if_missing "${BASE_URL}/templates/.context/services/README.md" ".context/services/README.md"
+  download_if_missing "${BASE_URL}/templates/.context/prds/templates/feature.md" ".context/prds/templates/feature.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/README.md" ".claude/skills/README.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/bug-reproduction/SKILL.md" ".claude/skills/bug-reproduction/SKILL.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/go-patterns/SKILL.md" ".claude/skills/go-patterns/SKILL.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/service-communication/SKILL.md" ".claude/skills/service-communication/SKILL.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/batch-operations/SKILL.md" ".claude/skills/batch-operations/SKILL.md"
+  download_if_missing "${BASE_URL}/templates/.claude/skills/git-platform/SKILL.md" ".claude/skills/git-platform/SKILL.md"
+
+  # Managed files: izicontext commands — always downloaded
+  download "${BASE_URL}/templates/.claude/commands/setup-context.md" ".claude/commands/setup-context.md"
+  download "${BASE_URL}/templates/.claude/commands/generate-prd.md" ".claude/commands/generate-prd.md"
+  download "${BASE_URL}/templates/.claude/commands/execute-prd.md" ".claude/commands/execute-prd.md"
+  download "${BASE_URL}/templates/.claude/commands/map-services.md" ".claude/commands/map-services.md"
+  download "${BASE_URL}/templates/.claude/commands/code-review.md" ".claude/commands/code-review.md"
+  download "${BASE_URL}/templates/.claude/commands/commit.md" ".claude/commands/commit.md"
+  download "${BASE_URL}/templates/.claude/commands/create-pr.md" ".claude/commands/create-pr.md"
+  download "${BASE_URL}/templates/.claude/commands/pr-comment.md" ".claude/commands/pr-comment.md"
+  download "${BASE_URL}/templates/.claude/commands/deep-context.md" ".claude/commands/deep-context.md"
+  download "${BASE_URL}/templates/.claude/commands/fix-bug.md" ".claude/commands/fix-bug.md"
+  download "${BASE_URL}/templates/.claude/commands/add-decision.md" ".claude/commands/add-decision.md"
+  download "${BASE_URL}/templates/.claude/commands/add-skill.md" ".claude/commands/add-skill.md"
+  download "${BASE_URL}/templates/.claude/commands/add-command.md" ".claude/commands/add-command.md"
+
+  # StatusLine script
+  download "${BASE_URL}/templates/.claude/scripts/statusline.sh" ".claude/scripts/statusline.sh"
+  chmod +x ".claude/scripts/statusline.sh"
+
+  # Agent files
+  download "${BASE_URL}/templates/.claude/agents/code-review/compliance-checker.md" ".claude/agents/code-review/compliance-checker.md"
+  download "${BASE_URL}/templates/.claude/agents/code-review/bug-detector.md" ".claude/agents/code-review/bug-detector.md"
+  download "${BASE_URL}/templates/.claude/agents/code-review/security-analyst.md" ".claude/agents/code-review/security-analyst.md"
+  download "${BASE_URL}/templates/.claude/agents/deep-context/step1-overview.md" ".claude/agents/deep-context/step1-overview.md"
+  download "${BASE_URL}/templates/.claude/agents/deep-context/step2-services.md" ".claude/agents/deep-context/step2-services.md"
+  download "${BASE_URL}/templates/.claude/agents/deep-context/step3-drill.md" ".claude/agents/deep-context/step3-drill.md"
+  download "${BASE_URL}/templates/.claude/agents/deep-context/step4-dataflow.md" ".claude/agents/deep-context/step4-dataflow.md"
+  download "${BASE_URL}/templates/.claude/agents/fix-bug/investigator.md" ".claude/agents/fix-bug/investigator.md"
+  download "${BASE_URL}/templates/.claude/agents/fix-bug/fix-conservative.md" ".claude/agents/fix-bug/fix-conservative.md"
+  download "${BASE_URL}/templates/.claude/agents/fix-bug/fix-minimal.md" ".claude/agents/fix-bug/fix-minimal.md"
+  download "${BASE_URL}/templates/.claude/agents/fix-bug/fix-refactor.md" ".claude/agents/fix-bug/fix-refactor.md"
+  download "${BASE_URL}/templates/.claude/agents/fix-bug/reviewer.md" ".claude/agents/fix-bug/reviewer.md"
+
+  # Declarative cleanup: remove stale files from managed directories
+  cleanup_managed_dir ".claude/agents/code-review" \
+    compliance-checker.md bug-detector.md security-analyst.md
+  cleanup_managed_dir ".claude/agents/deep-context" \
+    step1-overview.md step2-services.md step3-drill.md step4-dataflow.md
+  cleanup_managed_dir ".claude/agents/fix-bug" \
+    investigator.md fix-conservative.md fix-minimal.md fix-refactor.md reviewer.md
+  cleanup_managed_dir ".claude/scripts" \
+    statusline.sh notify.sh tool-failure-guard.sh
+
+  stop_spinner
+
+  if [ -n "$skipped_files" ]; then
+    printf "$skipped_files" | while read -r f; do
+      [ -n "$f" ] && print_gray "  skipped (exists): $f"
+    done
+  fi
+
+  touch ".context/prds/generated/.keep"
+  touch ".context/discoveries/.keep"
+  touch ".context/bugs/.keep"
+
+  setup_notifications 2>/dev/null || true
+
+  # MCP server configuration
+  if [ ! -f ".mcp.json" ]; then
+    local add_context7=false
+    local add_notion=false
+
+    if [ "$skip_prompts" = false ]; then
+      echo ""
+      print_blue "MCP Servers"
+      print_gray "Configure Model Context Protocol servers for Claude Code"
+      echo ""
+
+      if confirm_yes "  Add Context7? (up-to-date library docs for LLMs)"; then
+        add_context7=true
+      fi
+
+      if confirm_yes "  Add Notion? (tasks + docs via Notion API)"; then
+        add_notion=true
+      fi
+    else
+      add_context7=true
+      add_notion=true
+    fi
+
+    setup_mcp "$add_context7" "$add_notion"
+  else
+    print_gray "  skipped (exists): .mcp.json"
+  fi
+
+  # Substitute service name
+  if grep -q "{{projectName}}" "CLAUDE.md" 2>/dev/null; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "s/{{projectName}}/$project_name/g" "CLAUDE.md"
+    else
+      sed -i "s/{{projectName}}/$project_name/g" "CLAUDE.md"
+    fi
+  fi
+
+  echo ""
+  if [ "$is_reinit" = true ]; then
+    printf "  ${GREEN}${ICON_SUCCESS}${NC} Context structure updated\n"
+  else
+    printf "  ${GREEN}${ICON_SUCCESS}${NC} Context structure created\n"
+  fi
+  printf "  ${GRAY}CLAUDE.md  .context/  .claude/commands/ (13)  .claude/agents/ (12)${NC}\n"
+  echo ""
+
+  if [ "$skip_setup" = true ]; then
+    printf "  ${CYAN}Next:${NC}  run ${CYAN}/setup-context${NC} in Claude Code\n"
+  else
+    if command -v claude &> /dev/null; then
+      printf "  ${CYAN}Running /setup-context...${NC}\n\n"
+      claude "/setup-context"
+    else
+      printf "  ${YELLOW}Claude CLI not found.${NC} Run ${CYAN}/setup-context${NC} manually in Claude Code.\n"
+    fi
+  fi
+  echo ""
+}
+# ── Command: update ───────────────────────────────────────────────────────────
+
+cmd_update() {
+  local templates_only=false
+  local cli_only=false
+  local auto_yes=false
+  local dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --templates) templates_only=true; shift ;;
+      --cli) cli_only=true; shift ;;
+      --yes|-y) auto_yes=true; shift ;;
+      --dry-run) dry_run=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  if [ "$templates_only" = true ]; then
+    cmd_update_templates "$auto_yes" "$dry_run"
+  elif [ "$cli_only" = true ]; then
+    cmd_update_cli
+  else
+    cmd_update_cli
+    if [ -d ".context" ]; then
+      echo ""
+      local new_bin
+      new_bin=$(command -v izicontext 2>/dev/null || echo "")
+      if [ -n "$new_bin" ] && [ -x "$new_bin" ]; then
+        local new_ver
+        new_ver=$("$new_bin" --version 2>/dev/null | sed 's/izicontext //')
+        if [ "$new_ver" != "$VERSION" ]; then
+          local args="update --templates"
+          [ "$auto_yes" = "true" ] && args="$args --yes"
+          [ "$dry_run" = "true" ] && args="$args --dry-run"
+          exec "$new_bin" $args
+        fi
+      fi
+      cmd_update_templates "$auto_yes" "$dry_run"
+    fi
+  fi
+}
+
+cmd_update_cli() {
+  start_spinner "Checking for CLI updates..."
+
+  local latest_version latest_tag api_response
+
+  if command -v curl &> /dev/null; then
+    api_response=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)
+    latest_tag=$(echo "$api_response" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+    latest_version=$(echo "$latest_tag" | sed 's/^v//')
+    if [ -z "$latest_version" ]; then
+      api_response=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" 2>/dev/null)
+      latest_tag=$(echo "$api_response" | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+      latest_version=$(echo "$latest_tag" | sed 's/^v//')
+    fi
+  else
+    api_response=$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null)
+    latest_tag=$(echo "$api_response" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+    latest_version=$(echo "$latest_tag" | sed 's/^v//')
+    if [ -z "$latest_version" ]; then
+      api_response=$(wget -qO- "https://api.github.com/repos/${REPO}/tags" 2>/dev/null)
+      latest_tag=$(echo "$api_response" | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+      latest_version=$(echo "$latest_tag" | sed 's/^v//')
+    fi
+  fi
+
+  if [ -z "$latest_version" ]; then
+    stop_spinner
+    print_red "Could not check latest version."
+    return 1
+  fi
+
+  if [ "$VERSION" = "$latest_version" ]; then
+    stop_spinner "$(printf "${GREEN}${ICON_SUCCESS} CLI already at latest version ($VERSION)${NC}")"
+    return 0
+  fi
+
+  stop_spinner "$(printf "${GRAY}Current: $VERSION → Latest: $latest_version${NC}")"
+
+  local install_path=$(command -v izicontext)
+  [ -z "$install_path" ] && install_path="/usr/local/bin/izicontext"
+
+  local release_url="https://raw.githubusercontent.com/${REPO}/${latest_tag}/izicontext"
+  start_spinner "Downloading from release ${latest_tag}..."
+
+  local tmp_file=$(mktemp)
+  download "$release_url" "$tmp_file"
+  stop_spinner
+
+  if [ ! -s "$tmp_file" ] || ! head -1 "$tmp_file" | grep -q "^#!/bin/bash"; then
+    print_red "Error: Download failed"
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  chmod +x "$tmp_file"
+
+  if [ -w "$(dirname "$install_path")" ]; then
+    mv "$tmp_file" "$install_path"
+  else
+    print_yellow "Need sudo to update $install_path"
+    sudo mv "$tmp_file" "$install_path"
+    sudo chmod +x "$install_path"
+  fi
+
+  print_green "${ICON_SUCCESS} CLI updated to $latest_version"
+}
+
+cmd_update_templates() {
+  local auto_yes="$1"
+  local dry_run="$2"
+
+  if [ ! -d ".context" ]; then
+    print_red "No .context directory. Run \`izicontext init\` first."
+    return 1
+  fi
+
+  start_spinner "Checking templates..."
+
+  # MANAGED: always offered for update
+  declare -a managed_templates=(
+    "templates/.claude/commands/setup-context.md:.claude/commands/setup-context.md"
+    "templates/.claude/commands/generate-prd.md:.claude/commands/generate-prd.md"
+    "templates/.claude/commands/execute-prd.md:.claude/commands/execute-prd.md"
+    "templates/.claude/commands/map-services.md:.claude/commands/map-services.md"
+    "templates/.claude/commands/code-review.md:.claude/commands/code-review.md"
+    "templates/.claude/commands/commit.md:.claude/commands/commit.md"
+    "templates/.claude/commands/create-pr.md:.claude/commands/create-pr.md"
+    "templates/.claude/commands/pr-comment.md:.claude/commands/pr-comment.md"
+    "templates/.claude/commands/deep-context.md:.claude/commands/deep-context.md"
+    "templates/.claude/commands/fix-bug.md:.claude/commands/fix-bug.md"
+    "templates/.claude/commands/add-decision.md:.claude/commands/add-decision.md"
+    "templates/.claude/commands/add-skill.md:.claude/commands/add-skill.md"
+    "templates/.claude/commands/add-command.md:.claude/commands/add-command.md"
+    "templates/.claude/scripts/statusline.sh:.claude/scripts/statusline.sh"
+    "templates/.claude/agents/code-review/compliance-checker.md:.claude/agents/code-review/compliance-checker.md"
+    "templates/.claude/agents/code-review/bug-detector.md:.claude/agents/code-review/bug-detector.md"
+    "templates/.claude/agents/code-review/security-analyst.md:.claude/agents/code-review/security-analyst.md"
+    "templates/.claude/agents/deep-context/step1-overview.md:.claude/agents/deep-context/step1-overview.md"
+    "templates/.claude/agents/deep-context/step2-services.md:.claude/agents/deep-context/step2-services.md"
+    "templates/.claude/agents/deep-context/step3-drill.md:.claude/agents/deep-context/step3-drill.md"
+    "templates/.claude/agents/deep-context/step4-dataflow.md:.claude/agents/deep-context/step4-dataflow.md"
+    "templates/.claude/agents/fix-bug/investigator.md:.claude/agents/fix-bug/investigator.md"
+    "templates/.claude/agents/fix-bug/fix-conservative.md:.claude/agents/fix-bug/fix-conservative.md"
+    "templates/.claude/agents/fix-bug/fix-minimal.md:.claude/agents/fix-bug/fix-minimal.md"
+    "templates/.claude/agents/fix-bug/fix-refactor.md:.claude/agents/fix-bug/fix-refactor.md"
+    "templates/.claude/agents/fix-bug/reviewer.md:.claude/agents/fix-bug/reviewer.md"
+  )
+
+  # SEED: create-only, never overwrite
+  declare -a seed_templates=(
+    "templates/.context/prds/templates/feature.md:.context/prds/templates/feature.md"
+    "templates/.context/decisions/README.md:.context/decisions/README.md"
+    "templates/.context/services/README.md:.context/services/README.md"
+    "templates/.claude/skills/README.md:.claude/skills/README.md"
+    "templates/.claude/skills/bug-reproduction/SKILL.md:.claude/skills/bug-reproduction/SKILL.md"
+    "templates/.claude/skills/go-patterns/SKILL.md:.claude/skills/go-patterns/SKILL.md"
+    "templates/.claude/skills/service-communication/SKILL.md:.claude/skills/service-communication/SKILL.md"
+  )
+
+  local tmp_dir=$(mktemp -d)
+  trap "rm -rf $tmp_dir" EXIT
+
+  declare -a new_files=()
+  declare -a modified_files=()
+  declare -a unchanged_files=()
+  declare -a seed_new_files=()
+  declare -a seed_skipped_files=()
+
+  for mapping in "${managed_templates[@]}"; do
+    local remote_path="${mapping%%:*}"
+    local local_path="${mapping##*:}"
+    local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+
+    if ! download "${BASE_URL}/${remote_path}" "$tmp_file" 2>/dev/null; then
+      print_red "  failed to download: $remote_path"
+      continue
+    fi
+
+    if [ ! -f "$local_path" ]; then
+      new_files+=("$mapping")
+    elif ! diff -q "$local_path" "$tmp_file" >/dev/null 2>&1; then
+      modified_files+=("$mapping")
+    else
+      unchanged_files+=("$mapping")
+    fi
+  done
+
+  for mapping in "${seed_templates[@]}"; do
+    local remote_path="${mapping%%:*}"
+    local local_path="${mapping##*:}"
+    local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+
+    if ! download "${BASE_URL}/${remote_path}" "$tmp_file" 2>/dev/null; then
+      print_red "  failed to download: $remote_path"
+      continue
+    fi
+
+    if [ ! -f "$local_path" ]; then
+      seed_new_files+=("$mapping")
+    else
+      seed_skipped_files+=("$mapping")
+    fi
+  done
+
+  stop_spinner
+  echo ""
+
+  local has_changes=false
+
+  if [ ${#new_files[@]} -gt 0 ] || [ ${#seed_new_files[@]} -gt 0 ]; then
+    has_changes=true
+    for mapping in "${new_files[@]}"; do
+      printf "  ${GREEN}${ICON_ADD}${NC} %s ${GRAY}(new)${NC}\n" "${mapping##*:}"
+    done
+    for mapping in "${seed_new_files[@]}"; do
+      printf "  ${GREEN}${ICON_ADD}${NC} %s ${GRAY}(new — seed template)${NC}\n" "${mapping##*:}"
+    done
+  fi
+
+  if [ ${#modified_files[@]} -gt 0 ]; then
+    has_changes=true
+    for mapping in "${modified_files[@]}"; do
+      printf "  ${YELLOW}${ICON_MODIFY}${NC} %s ${GRAY}(modified)${NC}\n" "${mapping##*:}"
+    done
+  fi
+
+  for mapping in "${unchanged_files[@]}"; do
+    printf "  ${GRAY}${ICON_UNCHANGED}${NC} %s ${GRAY}(unchanged)${NC}\n" "${mapping##*:}"
+  done
+
+  for mapping in "${seed_skipped_files[@]}"; do
+    printf "  ${CYAN}${ICON_MANAGED}${NC} %s ${GRAY}(user-managed — skipped)${NC}\n" "${mapping##*:}"
+  done
+
+  local total_new=$((${#new_files[@]} + ${#seed_new_files[@]}))
+  echo ""
+  printf "Summary: ${GREEN}%d to add${NC}, ${YELLOW}%d to update${NC}, ${GRAY}%d unchanged${NC}, ${CYAN}%d user-managed${NC}\n" \
+    "$total_new" "${#modified_files[@]}" "${#unchanged_files[@]}" "${#seed_skipped_files[@]}"
+
+  if [ "$has_changes" = false ]; then
+    echo ""
+    print_green "${ICON_SUCCESS} All templates up to date"
+    return 0
+  fi
+
+  if [ "$dry_run" = "true" ]; then
+    echo ""
+    print_gray "Dry run - no changes made"
+    return 0
+  fi
+
+  local action="n"
+  if [ "$auto_yes" = "true" ]; then
+    action="y"
+  elif [ ${#modified_files[@]} -gt 0 ]; then
+    echo ""
+    printf "Update %d existing file(s)? [y/N/d] " "${#modified_files[@]}"
+    printf "${GRAY}(y=yes, N=no, d=show diffs)${NC} "
+    read -r action
+    action="${action:-n}"
+
+    if [[ "$action" =~ ^[Dd] ]]; then
+      echo ""
+      for mapping in "${modified_files[@]}"; do
+        local local_path="${mapping##*:}"
+        local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+        print_cyan "=== $local_path ==="
+        diff --color=auto -u "$local_path" "$tmp_file" 2>/dev/null
+        if [ $? -eq 2 ]; then diff -u "$local_path" "$tmp_file"; fi
+        echo ""
+      done
+      printf "Update %d existing file(s)? [y/N] " "${#modified_files[@]}"
+      read -r action
+      action="${action:-n}"
+    fi
+  else
+    action="y"
+  fi
+
+  local added=0 updated=0
+
+  for mapping in "${new_files[@]}"; do
+    local local_path="${mapping##*:}"
+    local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+    mkdir -p "$(dirname "$local_path")"
+    cp "$tmp_file" "$local_path"
+    ((added++))
+  done
+
+  for mapping in "${seed_new_files[@]}"; do
+    local local_path="${mapping##*:}"
+    local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+    mkdir -p "$(dirname "$local_path")"
+    cp "$tmp_file" "$local_path"
+    ((added++))
+  done
+
+  if [[ "$action" =~ ^[Yy] ]]; then
+    for mapping in "${modified_files[@]}"; do
+      local local_path="${mapping##*:}"
+      local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+      cp "$tmp_file" "$local_path"
+      ((updated++))
+    done
+  fi
+
+  cleanup_managed_dir ".claude/agents/code-review" \
+    compliance-checker.md bug-detector.md security-analyst.md
+  cleanup_managed_dir ".claude/agents/deep-context" \
+    step1-overview.md step2-services.md step3-drill.md step4-dataflow.md
+  cleanup_managed_dir ".claude/agents/fix-bug" \
+    investigator.md fix-conservative.md fix-minimal.md fix-refactor.md reviewer.md
+  cleanup_managed_dir ".claude/scripts" \
+    statusline.sh
+
+  echo ""
+  [ $added -gt 0 ] && print_green "${ICON_SUCCESS} Added $added new file(s)"
+  [ $updated -gt 0 ] && print_green "${ICON_SUCCESS} Updated $updated file(s)"
+  [ $added -eq 0 ] && [ $updated -eq 0 ] && print_gray "No changes made"
+}
+# ── Command: doctor ───────────────────────────────────────────────────────────
+
+cmd_doctor() {
+  print_block_header "izicontext doctor"
+  echo ""
+
+  local pass=0
+  local fail=0
+  local warn=0
+
+  check_pass() { printf "  ${GREEN}${ICON_SUCCESS}${NC} %s\n" "$1"; pass=$((pass + 1)); }
+  check_fail() { printf "  ${RED}${ICON_ERROR}${NC} %s\n" "$1";  fail=$((fail + 1)); }
+  check_warn() { printf "  ${YELLOW}${ICON_WARNING}${NC} %s\n" "$1"; warn=$((warn + 1)); }
+
+  # Git repository
+  if git rev-parse --is-inside-work-tree &>/dev/null; then
+    check_pass "Git repository"
+  else
+    check_fail "Git repository — not a git repo"
+  fi
+
+  # Claude CLI
+  if command -v claude &>/dev/null; then
+    local claude_ver
+    claude_ver=$(claude --version 2>/dev/null || echo "unknown")
+    check_pass "Claude CLI installed ($claude_ver)"
+  else
+    check_fail "Claude CLI — not installed"
+  fi
+
+  # Go toolchain
+  if command -v go &>/dev/null; then
+    local go_ver
+    go_ver=$(go version 2>/dev/null | awk '{print $3}')
+    check_pass "Go toolchain ($go_ver)"
+    if [ -f "go.mod" ]; then
+      local module
+      module=$(head -1 go.mod | awk '{print $2}')
+      check_pass "go.mod found (module: $module)"
+    else
+      check_warn "go.mod — not found (is this a Go service?)"
+    fi
+  else
+    check_warn "Go toolchain — not installed (expected for Go microservices)"
+  fi
+
+  # .context/ directory
+  if [ -d ".context" ]; then
+    check_pass ".context/ directory exists"
+  else
+    check_fail ".context/ directory — missing (run izicontext init)"
+  fi
+
+  # CLAUDE.md
+  if [ -s "CLAUDE.md" ]; then
+    if grep -q "{{projectName}}" "CLAUDE.md" 2>/dev/null; then
+      check_warn "CLAUDE.md — exists but has unfilled placeholders"
+    else
+      check_pass "CLAUDE.md populated"
+    fi
+  elif [ -f "CLAUDE.md" ]; then
+    check_warn "CLAUDE.md — exists but empty"
+  else
+    check_fail "CLAUDE.md — missing"
+  fi
+
+  # CONTEXT.md
+  if [ -s ".context/CONTEXT.md" ]; then
+    check_pass ".context/CONTEXT.md populated"
+  elif [ -f ".context/CONTEXT.md" ]; then
+    check_warn ".context/CONTEXT.md — exists but empty"
+  else
+    check_fail ".context/CONTEXT.md — missing"
+  fi
+
+  # services directory
+  if [ -d ".context/services" ]; then
+    local svc_count
+    svc_count=$(find .context/services -name "*.md" ! -name "README.md" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$svc_count" -gt 0 ]; then
+      check_pass ".context/services/ — $svc_count service doc(s)"
+    else
+      check_warn ".context/services/ — no service docs (run /map-services)"
+    fi
+  else
+    check_warn ".context/services/ — missing (run izicontext init)"
+  fi
+
+  # decisions
+  local adr_count=0
+  if [ -d ".context/decisions" ]; then
+    adr_count=$(find .context/decisions -name "*.md" ! -name "README.md" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  if [ "$adr_count" -gt 0 ]; then
+    check_pass ".context/decisions/ — $adr_count ADR(s)"
+  else
+    check_warn ".context/decisions/ — no ADRs found"
+  fi
+
+  # commands
+  local cmd_count=0
+  if [ -d ".claude/commands" ]; then
+    cmd_count=$(find .claude/commands -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  if [ "$cmd_count" -gt 0 ]; then
+    check_pass ".claude/commands/ — $cmd_count command(s)"
+  else
+    check_fail ".claude/commands/ — no commands found"
+  fi
+
+  # agents
+  local agent_count=0
+  if [ -d ".claude/agents" ]; then
+    agent_count=$(find .claude/agents -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  if [ "$agent_count" -gt 0 ]; then
+    check_pass ".claude/agents/ — $agent_count agent(s)"
+  else
+    check_warn ".claude/agents/ — no agents found (run izicontext update)"
+  fi
+
+  # skills
+  if [ -d ".claude/skills" ]; then
+    local skill_count
+    skill_count=$(find .claude/skills -name "SKILL.md" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$skill_count" -gt 0 ]; then
+      check_pass ".claude/skills/ — $skill_count skill(s)"
+    else
+      check_warn ".claude/skills/ — directory exists but no skills"
+    fi
+  else
+    check_warn ".claude/skills/ — missing"
+  fi
+
+  # .mcp.json
+  if [ -f ".mcp.json" ]; then
+    if command -v jq &>/dev/null; then
+      local server_count
+      server_count=$(jq '.mcpServers | length' .mcp.json 2>/dev/null || echo "0")
+      check_pass ".mcp.json — $server_count MCP server(s)"
+      if ! jq -e '.mcpServers.notion' .mcp.json &>/dev/null; then
+        check_warn "Notion MCP — not configured (tasks + docs integration missing)"
+      fi
+    else
+      check_pass ".mcp.json exists"
+    fi
+  else
+    check_warn ".mcp.json — missing (no MCP servers configured)"
+  fi
+
+  # hooks
+  if [ -f ".claude/settings.json" ]; then
+    if grep -q "notify.sh" ".claude/settings.json" 2>/dev/null; then
+      check_pass "Notification hooks configured (project-local)"
+    else
+      check_warn "Notification hooks — not configured in .claude/settings.json"
+    fi
+    if grep -q "tool-failure-guard" ".claude/settings.json" 2>/dev/null; then
+      check_pass "Tool failure guard hook configured"
+    else
+      check_warn "Tool failure guard — not configured"
+    fi
+  else
+    check_warn ".claude/settings.json — missing (no hooks configured)"
+  fi
+
+  print_block_footer
+  printf "  ${GREEN}%d passed${NC}  ${RED}%d failed${NC}  ${YELLOW}%d warnings${NC}\n" "$pass" "$fail" "$warn"
+
+  if [ "$fail" -gt 0 ]; then
+    echo ""
+    print_gray "  Fix failures with: izicontext init"
+    return 1
+  fi
+}
+# ── Command: help ─────────────────────────────────────────────────────────────
+
+cmd_help() {
+  local width
+  width=$(get_term_width)
+
+  local cmd_col=22
+  local opt_col=24
+  if [ "$width" -ge 100 ]; then
+    cmd_col=26
+    opt_col=28
+  fi
+
+  echo ""
+  printf "  ${BOLD}izicontext${NC} ${GRAY}— AI context toolkit for microservices (Go-first)${NC}\n"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Usage${NC}\n"
+  printf "    izicontext <command> [options]\n"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Commands${NC}\n"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "init"       "Initialize .context structure + open Claude Code"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "update"     "Update CLI and/or templates"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "doctor"     "Check project setup health"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "completion" "Generate shell tab completions"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Init Options${NC}\n"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--name, -n <name>" "Service name"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--yes, -y"         "Skip prompts, use defaults"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--no-setup"        "Skip automatic /setup-context"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Update Options${NC}\n"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--cli"       "Only update CLI"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--templates" "Only update templates"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--yes, -y"   "Update without asking"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--dry-run"   "Show what would change"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Global Options${NC}\n"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--help, -h"    "Show this help"
+  printf "    ${YELLOW}%-${opt_col}s${NC}%s\n" "--version, -v" "Show version"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Claude Code Commands${NC} ${GRAY}(after init)${NC}\n"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/setup-context"  "Analyze service and populate context"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/generate-prd"   "Plan a new feature (PRD)"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/execute-prd"    "Implement a planned feature"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/map-services"   "Map inter-service dependencies"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/code-review"    "Multi-agent code review (Go-aware)"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/commit"         "Smart commit messages"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/create-pr"      "Create PR with description"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/deep-context"   "Structured service exploration"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/fix-bug"        "Test-driven bug fixing"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/add-decision"   "Add architectural decision"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/add-skill"      "Add skill guide"
+  printf "    ${CYAN}%-${cmd_col}s${NC}%s\n" "/add-command"    "Create custom command"
+  echo ""
+
+  printf "  ${BLUE}${BOLD}Examples${NC}\n"
+  printf "    ${GRAY}\$${NC} izicontext init\n"
+  printf "    ${GRAY}\$${NC} izicontext init --name \"payment-service\"\n"
+  printf "    ${GRAY}\$${NC} izicontext update --dry-run\n"
+  printf "    ${GRAY}\$${NC} izicontext doctor\n"
+  printf "    ${GRAY}\$${NC} eval \"\$(izicontext completion bash)\"\n"
+  echo ""
+}
+# ── Command: completion ───────────────────────────────────────────────────────
+
+cmd_completion() {
+  local shell="${1:-}"
+  if [ -z "$shell" ]; then
+    if [ -n "$ZSH_VERSION" ]; then
+      shell="zsh"
+    else
+      shell="bash"
+    fi
+  fi
+
+  case "$shell" in
+    bash)
+      cat << 'BASH_COMP'
+_izicontext() {
+  local cur prev commands
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+  commands="init update doctor completion"
+
+  case "$prev" in
+    izicontext)
+      COMPREPLY=( $(compgen -W "$commands --help --version" -- "$cur") )
+      return 0
+      ;;
+    init)
+      COMPREPLY=( $(compgen -W "--name -n --yes -y --no-setup" -- "$cur") )
+      return 0
+      ;;
+    update)
+      COMPREPLY=( $(compgen -W "--cli --templates --yes -y --dry-run" -- "$cur") )
+      return 0
+      ;;
+    completion)
+      COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+      return 0
+      ;;
+  esac
+
+  COMPREPLY=( $(compgen -W "$commands --help --version" -- "$cur") )
+}
+complete -F _izicontext izicontext
+BASH_COMP
+      ;;
+    zsh)
+      cat << 'ZSH_COMP'
+#compdef izicontext
+
+_izicontext() {
+  local -a commands
+  commands=(
+    'init:Initialize .context structure + open Claude Code'
+    'update:Update CLI and/or templates'
+    'doctor:Check project setup health'
+    'completion:Generate shell tab completions'
+  )
+
+  _arguments -C \
+    '1:command:->command' \
+    '*::arg:->args'
+
+  case "$state" in
+    command)
+      _describe 'command' commands
+      _arguments \
+        '--help[Show help]' \
+        '-h[Show help]' \
+        '--version[Show version]' \
+        '-v[Show version]'
+      ;;
+    args)
+      case "${words[1]}" in
+        init)
+          _arguments \
+            '--name[Service name]:name:' \
+            '-n[Service name]:name:' \
+            '--yes[Skip prompts]' \
+            '-y[Skip prompts]' \
+            '--no-setup[Skip automatic /setup-context]'
+          ;;
+        update)
+          _arguments \
+            '--cli[Only update CLI]' \
+            '--templates[Only update templates]' \
+            '--yes[Update without asking]' \
+            '-y[Update without asking]' \
+            '--dry-run[Show what would change]'
+          ;;
+        completion)
+          _arguments '1:shell:(bash zsh)'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+compdef _izicontext izicontext
+ZSH_COMP
+      ;;
+    *)
+      print_red "Unknown shell: $shell (supported: bash, zsh)"
+      return 1
+      ;;
+  esac
+}
+# ── Main Routing ──────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+  init) shift; cmd_init "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  doctor) cmd_doctor ;;
+  completion) shift; cmd_completion "$@" ;;
+  --version|-v) echo "izicontext $VERSION" ;;
+  --help|-h|"") cmd_help ;;
+  *) print_red "Unknown command: $1. Run 'izicontext --help' for usage."; exit 1 ;;
+esac
