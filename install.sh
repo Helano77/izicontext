@@ -2,9 +2,9 @@
 set -e
 
 # izicontext installer
-# Usage: curl -sSL https://raw.githubusercontent.com/YOUR_ORG/izicontext/main/install.sh | bash
+# Usage: curl -sSL https://raw.githubusercontent.com/Helano77/izicontext/main/install.sh | bash
 
-REPO="YOUR_ORG/izicontext"
+REPO="Helano77/izicontext"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="izicontext"
 
