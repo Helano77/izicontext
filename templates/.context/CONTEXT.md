@@ -1,11 +1,27 @@
 # {{projectName}} — Service Context
 
+> **How to use this file:** Do NOT read it top-to-bottom.
+> 1. Find your topic in the **Quick Reference Index** below.
+> 2. Read only the sections and service files listed for that topic.
+> 3. Proceed with that focused context — ignore the rest.
+
 ## Overview
 - **Service:** {{projectName}}
 - **Domain:** [bounded context — e.g., payments, identity, catalog]
 - **Team:** [team responsible]
 - **Repository:** [git URL]
 - **Purpose:** [one paragraph — what problem this service solves]
+
+---
+
+## Quick Reference Index
+
+> Populated by `/setup-context` (domain terms + flows) and `/map-services` (service dependencies).
+> Add rows manually for any topic that keeps coming up.
+
+| Topic / Keyword | Sections in this file | Related service files |
+|---|---|---|
+| [fill by /setup-context] | | |
 
 ---
 

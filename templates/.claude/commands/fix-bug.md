@@ -9,6 +9,15 @@ Test-driven bug fix with parallel agents. Zero questions — goes straight from 
 
 ---
 
+## Phase 0 — Gather focused context
+
+Load: `.claude/agents/gather-context/gather-context.md`
+Context: [bug description argument]
+
+Wait for the Context Block before proceeding.
+
+---
+
 ## Phase 1 — Investigation
 
 Load: `.claude/agents/fix-bug/investigator.md`
@@ -16,7 +25,8 @@ Load: `.claude/agents/fix-bug/investigator.md`
 Context:
 - Bug description
 - Issue/PR content (if flags provided)
-- `CLAUDE.md` and `.context/CONTEXT.md`
+- Context Block from Phase 0
+- `CLAUDE.md` — Go conventions
 - Relevant source files (search for keywords from description)
 
 The investigator MUST:

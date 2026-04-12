@@ -8,19 +8,25 @@ Structured 4-step exploration of a Go microservice. Uses specialized agents to b
 
 ---
 
-## Setup
+## Phase 0 — Gather focused context
 
-Read `.context/CONTEXT.md` for known service dependencies.
-If `--cache`, list relevant discovery files from `.context/discoveries/`.
+Load: `.claude/agents/gather-context/gather-context.md`
+Context: [query argument]
+
+Wait for the Context Block.
+
+If `--cache`: list files in `.context/discoveries/` whose slug matches the query. Read the most recent matching file and append its Key Findings to the Context Block as "Cached findings."
 
 ---
 
 ## Steps 1+2 — Run in parallel
 
 ### Step 1 — Overview Agent
+Context: Context Block from Phase 0
 Load: `.claude/agents/deep-context/step1-overview.md`
 
 ### Step 2 — Services Agent
+Context: Context Block from Phase 0
 Load: `.claude/agents/deep-context/step2-services.md`
 
 Wait for both to complete before proceeding.
