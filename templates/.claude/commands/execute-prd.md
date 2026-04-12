@@ -4,16 +4,30 @@ Implement a feature from a PRD in `.context/prds/generated/`. Follows decision c
 
 ---
 
-## Step 1 — Load context
+## Step 1a — Read the PRD
 
-Read:
-- `.context/prds/generated/[prd-name].md` — the PRD
-- `CLAUDE.md` — service rules and conventions
-- `.context/decisions/` — ADRs
-- `.context/CONTEXT.md` — current API surface
-- Relevant source files mentioned in the PRD
+Read `.context/prds/generated/[prd-name].md`.
 
-If the PRD file is not found, list available PRDs in `.context/prds/generated/` and ask which one.
+If not found, list available PRDs in `.context/prds/generated/` and ask which one.
+
+Extract and note:
+- PRD title and feature slug
+- Services listed in the Services Affected table
+- ADRs listed under "Existing ADRs to respect"
+
+---
+
+## Step 1b — Gather focused context
+
+Load: `.claude/agents/gather-context/gather-context.md`
+Context: [PRD title] — services: [services from Services Affected table]
+
+Wait for the Context Block. Then:
+- Read `CLAUDE.md` — Go conventions and service rules
+- For each service in the Services Affected table: read `.context/services/[service].md` if not already covered by the Context Block
+- For each ADR listed in the PRD: read that specific ADR only
+
+The Context Block plus the above reads are the complete context for this PRD. Do not read `.context/CONTEXT.md` in full.
 
 ---
 
@@ -51,19 +65,20 @@ Create worktree and switch to it.
 
 For each phase in the PRD:
 
-1. **Announce the phase** — print phase name and tasks
-2. **Implement tasks** — follow Go conventions from CLAUDE.md:
+1. **Anchor to context** — re-read the Context Block from Step 1b. Use it to confirm which services and patterns apply to this phase. Do NOT re-read CONTEXT.md or service files unless the phase introduces a service not in the Context Block.
+2. **Announce the phase** — print phase name and tasks
+3. **Implement tasks** — follow Go conventions from CLAUDE.md:
    - Import organization (stdlib → external → internal)
    - Error wrapping with context
    - Context as first param
    - Constructor pattern
    - No business logic in handlers
-3. **Write tests** — table-driven unit tests for new business logic; integration tests for new endpoints
-4. **Validate** — run the phase's validation step:
+4. **Write tests** — table-driven unit tests for new business logic; integration tests for new endpoints
+5. **Validate** — run the phase's validation step:
    - `go build ./...` — must pass
    - `go test ./[affected-packages]/...` — must pass
    - `golangci-lint run ./[affected-packages]/...` — must pass (if lint available)
-5. **Stop on failure** — diagnose the error, fix it, revalidate. Do not proceed to next phase with broken code.
+6. **Stop on failure** — diagnose the error, fix it, revalidate. Do not proceed to next phase with broken code.
 
 ---
 

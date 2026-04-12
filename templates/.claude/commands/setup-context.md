@@ -41,6 +41,10 @@ Fill in `.context/CONTEXT.md`:
 
 Leave API Contracts and Events for Task 4.
 
+After filling Overview, Service Map, and Glossary, populate the **Quick Reference Index** table:
+- For each term in the Glossary: add a row mapping it to the relevant CONTEXT.md sections
+- For each upstream/downstream service in the Service Map: add a row pointing to their `.context/services/[name].md` file (to be created by `/map-services`)
+
 ---
 
 ## Task 4 — Document API contracts and events
@@ -54,6 +58,10 @@ Fill in CONTEXT.md:
 - **Events Consumed**: topic, handler file, action taken
 
 Use `file:line` references for each entry.
+
+After filling API contracts and events, add rows to the **Quick Reference Index** for:
+- Each REST endpoint group (by resource path prefix)
+- Each event topic (producer and consumer side)
 
 ---
 
@@ -154,4 +162,5 @@ After all tasks, summarize:
 - Files populated
 - ADRs created (list titles)
 - Any warnings (missing config, incomplete sections)
+- Confirm: `.context/CONTEXT.md` Quick Reference Index has at least one row per Glossary term
 - Next suggested command: `/map-services` to document inter-service dependencies

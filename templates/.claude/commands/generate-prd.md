@@ -4,6 +4,15 @@ Generate a Product Requirements Document (PRD) for a new feature. Optimized for 
 
 ---
 
+## Phase 0 — Gather focused context
+
+Load: `.claude/agents/gather-context/gather-context.md`
+Context: [feature description argument]
+
+Wait for the Context Block before proceeding. It will inform which services and constraints to reference in the clarifying questions and current state analysis.
+
+---
+
 ## Phase 1 — Ask 10 clarifying questions
 
 **Do not skip this phase.** Ask all questions before writing the PRD.
@@ -27,18 +36,20 @@ Wait for answers. Do not proceed until all are answered.
 
 ## Phase 2 — Analyze current state
 
-Read:
-- `CLAUDE.md` — service identity, stack, rules
-- `.context/CONTEXT.md` — current API contracts, events, service map
-- `.context/decisions/` — ADRs that may apply
-- `.context/services/` — service docs for affected services
-- Relevant `internal/` packages mentioned in answers
+Using the Context Block from Phase 0 and the answers from Phase 1:
+
+1. Read `CLAUDE.md` — service identity, stack, rules
+2. Read only the **service files** named in the Context Block or mentioned in Phase 1 answers — from `.context/services/[name].md`
+3. Read only the **ADRs** whose slugs relate to the feature topic or named services — not all ADRs
+4. Read relevant `internal/` packages mentioned in the answers
+
+**Rule:** Do NOT read `.context/CONTEXT.md` in full or all files in `.context/decisions/`. The Context Block already surfaced what matters.
 
 Identify:
-- What exists that can be reused
-- What will need to change
-- ADR conflicts to flag
-- Services that need coordination
+- What exists that can be reused (with file references)
+- What will need to change (per named service)
+- ADR conflicts to flag (only from ADRs you read)
+- Services that need coordination (from Context Block)
 
 ---
 
