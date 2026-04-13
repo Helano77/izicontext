@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/izicontext.png" alt="izicontext logo" width="150">
+  <img src="assets/izicontext.svg" alt="izicontext logo" width="150">
 </p>
 
 <h1 align="center">izicontext</h1>
