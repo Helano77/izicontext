@@ -159,7 +159,7 @@ cmd_init() {
         add_context7=true
       fi
 
-      if confirm_yes "  Add Notion? (tasks + docs via Notion API)"; then
+      if confirm_yes "  Add Notion? (tasks + docs via browser OAuth login)"; then
         add_notion=true
       fi
     else

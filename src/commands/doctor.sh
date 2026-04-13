@@ -138,7 +138,9 @@ cmd_doctor() {
       local server_count
       server_count=$(jq '.mcpServers | length' .mcp.json 2>/dev/null || echo "0")
       check_pass ".mcp.json — $server_count MCP server(s)"
-      if ! jq -e '.mcpServers.notion' .mcp.json &>/dev/null; then
+      if jq -e '.mcpServers.notion' .mcp.json &>/dev/null; then
+        check_pass "Notion MCP — configured (authenticate via browser on first use)"
+      else
         check_warn "Notion MCP — not configured (tasks + docs integration missing)"
       fi
     else

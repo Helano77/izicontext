@@ -27,10 +27,7 @@ setup_mcp() {
     servers="${servers}${comma}
     \"notion\": {
       \"command\": \"npx\",
-      \"args\": [\"-y\", \"@notionhq/notion-mcp-server\"],
-      \"env\": {
-        \"OPENAPI_MCP_HEADERS\": \"{\\\"Authorization\\\": \\\"Bearer \${NOTION_API_KEY}\\\", \\\"Notion-Version\\\": \\\"2022-06-28\\\"}\"
-      }
+      \"args\": [\"-y\", \"@notionhq/notion-mcp-server\"]
     }"
   fi
 
@@ -43,8 +40,7 @@ setup_mcp() {
 EOF
     print_gray "MCP servers configured in .mcp.json"
     if [ "$add_notion" = true ]; then
-      print_yellow "Notion MCP: set NOTION_API_KEY in your environment"
-      print_yellow "Get your key at: https://www.notion.so/profile/integrations"
+      print_yellow "Notion MCP: authenticate via browser on first use (OAuth login)"
     fi
   fi
 }

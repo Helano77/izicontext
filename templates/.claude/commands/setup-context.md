@@ -132,7 +132,7 @@ Fill in with real patterns from `internal/clients/`:
 ## Task 10 — Verify MCP configuration
 
 Check `.mcp.json`:
-- If `notion` is configured but `NOTION_API_KEY` env var isn't set, warn the user
+- If `notion` is configured, remind user to authenticate via browser OAuth on first use
 - If Context7 is configured, confirm `npx` is available
 - If `.mcp.json` doesn't exist, remind user to run `izicontext init` or configure manually
 
