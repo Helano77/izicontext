@@ -134,6 +134,7 @@ cmd_update_templates() {
     "templates/.claude/commands/add-decision.md:.claude/commands/add-decision.md"
     "templates/.claude/commands/add-skill.md:.claude/commands/add-skill.md"
     "templates/.claude/commands/add-command.md:.claude/commands/add-command.md"
+    "templates/.claude/commands/get-task.md:.claude/commands/get-task.md"
     "templates/.claude/scripts/statusline.sh:.claude/scripts/statusline.sh"
     "templates/.claude/agents/code-review/compliance-checker.md:.claude/agents/code-review/compliance-checker.md"
     "templates/.claude/agents/code-review/bug-detector.md:.claude/agents/code-review/bug-detector.md"

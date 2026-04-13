@@ -97,6 +97,7 @@ cmd_init() {
   download "${BASE_URL}/templates/.claude/commands/add-decision.md" ".claude/commands/add-decision.md"
   download "${BASE_URL}/templates/.claude/commands/add-skill.md" ".claude/commands/add-skill.md"
   download "${BASE_URL}/templates/.claude/commands/add-command.md" ".claude/commands/add-command.md"
+  download "${BASE_URL}/templates/.claude/commands/get-task.md" ".claude/commands/get-task.md"
 
   # StatusLine script
   download "${BASE_URL}/templates/.claude/scripts/statusline.sh" ".claude/scripts/statusline.sh"
@@ -187,7 +188,7 @@ cmd_init() {
   else
     printf "  ${GREEN}${ICON_SUCCESS}${NC} Context structure created\n"
   fi
-  printf "  ${GRAY}CLAUDE.md  .context/  .claude/commands/ (13)  .claude/agents/ (12)${NC}\n"
+  printf "  ${GRAY}CLAUDE.md  .context/  .claude/commands/ (14)  .claude/agents/ (12)${NC}\n"
   echo ""
 
   if [ "$skip_setup" = true ]; then
