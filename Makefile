@@ -19,7 +19,7 @@ SOURCES = \
 
 OUTPUT = izicontext
 
-.PHONY: build clean
+.PHONY: build clean release
 
 build: $(OUTPUT)
 
@@ -31,3 +31,14 @@ $(OUTPUT): $(SOURCES)
 
 clean:
 	@rm -f $(OUTPUT)
+
+# Usage: make release VERSION=0.2.0
+release: build
+	@[ -n "$(VERSION)" ] || (echo "Error: VERSION is required (e.g. make release VERSION=0.2.0)" && exit 1)
+	@sed -i'' -e 's/^VERSION=.*/VERSION="$(VERSION)"/' src/header.sh
+	@make build
+	@git add src/header.sh izicontext
+	@git commit -m "bump: v$(VERSION)"
+	@git tag v$(VERSION)
+	@git push origin main v$(VERSION)
+	@echo "Released v$(VERSION) — GitHub Actions will create the release"

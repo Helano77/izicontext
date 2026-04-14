@@ -26,8 +26,8 @@ setup_mcp() {
   if [ "$add_notion" = true ]; then
     servers="${servers}${comma}
     \"notion\": {
-      \"command\": \"npx\",
-      \"args\": [\"-y\", \"@notionhq/notion-mcp-server\"]
+      \"type\": \"http\",
+      \"url\": \"https://mcp.notion.com/mcp\"
     }"
   fi
 
