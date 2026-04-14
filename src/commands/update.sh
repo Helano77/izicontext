@@ -253,17 +253,14 @@ cmd_update_templates() {
     return 0
   fi
 
-  local action="n"
-  if [ "$auto_yes" = "true" ]; then
-    action="y"
-  elif [ ${#modified_files[@]} -gt 0 ]; then
+  local show_diffs="n"
+  if [ "$auto_yes" != "true" ] && [ ${#modified_files[@]} -gt 0 ]; then
     echo ""
-    printf "Update %d existing file(s)? [y/N/d] " "${#modified_files[@]}"
-    printf "${GRAY}(y=yes, N=no, d=show diffs)${NC} "
-    read -r action
-    action="${action:-n}"
+    printf "Show diffs before applying %d update(s)? [y/N] " "${#modified_files[@]}"
+    read -r show_diffs
+    show_diffs="${show_diffs:-n}"
 
-    if [[ "$action" =~ ^[Dd] ]]; then
+    if [[ "$show_diffs" =~ ^[Yy] ]]; then
       echo ""
       for mapping in "${modified_files[@]}"; do
         local local_path="${mapping##*:}"
@@ -273,12 +270,7 @@ cmd_update_templates() {
         if [ $? -eq 2 ]; then diff -u "$local_path" "$tmp_file"; fi
         echo ""
       done
-      printf "Update %d existing file(s)? [y/N] " "${#modified_files[@]}"
-      read -r action
-      action="${action:-n}"
     fi
-  else
-    action="y"
   fi
 
   local added=0 updated=0
@@ -299,14 +291,12 @@ cmd_update_templates() {
     ((added++))
   done
 
-  if [[ "$action" =~ ^[Yy] ]]; then
-    for mapping in "${modified_files[@]}"; do
-      local local_path="${mapping##*:}"
-      local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
-      cp "$tmp_file" "$local_path"
-      ((updated++))
-    done
-  fi
+  for mapping in "${modified_files[@]}"; do
+    local local_path="${mapping##*:}"
+    local tmp_file="$tmp_dir/$(echo "$local_path" | sed 's|/|__|g')"
+    cp "$tmp_file" "$local_path"
+    ((updated++))
+  done
 
   cleanup_managed_dir ".claude/agents/code-review" \
     compliance-checker.md bug-detector.md security-analyst.md
