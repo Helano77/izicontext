@@ -282,13 +282,16 @@ izicontext init --name payment-service
 # 3. Map dependencies (in Claude Code)
 /map-services
 
-# 4. Plan a feature (in Claude Code)
+# 4. Get the task to add context (in Claude Code)
+/get-task FICA-NNNN
+
+# 5. Plan a feature (in Claude Code)
 /generate-prd "add webhook delivery with retry logic"
 
-# 5. Implement (in Claude Code)
+# 6. Implement (in Claude Code)
 /execute-prd 20260412-webhook-delivery
 
-# 6. Review and ship (in Claude Code)
+# 7. Review and ship (in Claude Code)
 /code-review --comment
 /commit
 /create-pr
